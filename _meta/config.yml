@@ -1,0 +1,7 @@
+- module: oracledb
+  metricsets: ["status", "tablespace"]
+  enabled: true
+  period: 10s
+
+  # Host DSN should be defined as "user/pass@host:port/oracle_servicename"
+  hosts: ["scott/tiger@localhost:1521/orcl"]

@@ -1,0 +1,9 @@
+- name: fra
+  type: group
+  description: >
+    fra
+  fields:
+    - name: example
+      type: keyword
+      description: >
+        Example field

@@ -1,0 +1,9 @@
+- name: tablespace
+  type: group
+  description: >
+    tablespace
+  fields:
+    - name: example
+      type: keyword
+      description: >
+        Example field

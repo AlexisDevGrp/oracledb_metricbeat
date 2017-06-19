@@ -1,0 +1,11 @@
+- key: oracledb
+  title: "oracledb"
+  description: >
+    []experimental
+
+    oracledb is a module for oracle database beats.
+  fields:
+    - name: oracledb
+      type: group
+      description: >
+      fields:
