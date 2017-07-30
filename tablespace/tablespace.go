@@ -1,6 +1,9 @@
 package tablespace
 
 import (
+	"fmt"
+	"runtime/debug"
+
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/metricbeat/mb"
@@ -49,21 +52,26 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 // descriptive error must be returned.
 // func (m *MetricSet) Fetch() (common.MapStr, error) {
 func (m *MetricSet) Fetch() ([]common.MapStr, error) {
-	var err error
-	// Open db connection if not done already
-	if m.oraDB.Db == nil {
-		m.oraDB, err = oracledb.NewDB(m.HostData().URI)
-		if err != nil {
-			m.oraDB.Db = nil
-			return nil, errors.Wrap(err, "oracledb-tablespace open db connection failed")
+	// Recover panic is for deugging only!!!
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("Panic!", err)
+			fmt.Println(string(debug.Stack()))
 		}
+	}()
+
+	// Open Dataase connection
+	oraDB, err := oracledb.NewDB(m.HostData().URI)
+	if err != nil {
+		failEvent := []common.MapStr{{"status": "OFFLINE"}}
+		return failEvent, errors.Wrap(err, "oracledb-status open db connection failed")
 	}
+	defer oraDB.Close()
 
 	// Oracle Database query of this MetricSet
+	// Any database version
 	var qry string
-	if oracledb.VersionMatch(m.oraDB.Version, "0", "9999") == 1 {
-		// Any version
-		qry = `SELECT c.tablespace_name, c.block_size, c.status, c.contents, c.logging, c.force_logging,
+	qry = `SELECT c.tablespace_name, c.block_size, c.status, c.contents, c.logging, c.force_logging,
                       c.extent_management, c.segment_space_management, c.bigfile, c.encrypted,
                       b.tbs_size size_bytes,
                       CASE WHEN c.contents = 'UNDO' THEN b.tbs_size-d.used_bytes ELSE a.free END free_bytes,
@@ -88,13 +96,11 @@ func (m *MetricSet) Fetch() ([]common.MapStr, error) {
                WHERE  b.tablespace_name = a.tablespace_name
                AND    b.tablespace_name = c.tablespace_name
                AND    b.tablespace_name = d.tablespace_name(+)`
-	}
 
 	// Load data
 	var data []map[string]interface{}
-	data, err = oracledb.ProcessMetric(m.oraDB.Db, qry)
+	data, err = oracledb.ProcessMetric(oraDB, qry)
 	if err != nil {
-		m.oraDB.Db = nil
 		return nil, errors.Wrap(err, "oracledb-tablespace fetch failed")
 	}
 

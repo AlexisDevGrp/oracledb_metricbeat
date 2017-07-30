@@ -1,9 +1,14 @@
 package fra
 
 import (
+	"fmt"
+	"runtime/debug"
+
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/metricbeat/mb"
+	"github.com/odbaeu/oracledb_metricbeat/module/oracledb"
+	"github.com/pkg/errors"
 )
 
 // init registers the MetricSet with the central registry.
@@ -45,12 +50,44 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 // Fetch methods implements the data gathering and data conversion to the right format
 // It returns the event which is then forward to the output. In case of an error, a
 // descriptive error must be returned.
-func (m *MetricSet) Fetch() (common.MapStr, error) {
+func (m *MetricSet) Fetch() ([]common.MapStr, error) {
+	// Recover panic is for deugging only!!!
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("Panic!", err)
+			fmt.Println(string(debug.Stack()))
+		}
+	}()
 
-	event := common.MapStr{
-		"counter": m.counter,
+	// Open Dataase connection
+	oraDB, err := oracledb.NewDB(m.HostData().URI)
+	if err != nil {
+		failEvent := []common.MapStr{{"status": "OFFLINE"}}
+		return failEvent, errors.Wrap(err, "oracledb-status open db connection failed")
 	}
-	m.counter++
+	defer oraDB.Close()
+
+	// Oracle Database query of this MetricSet
+	// Any database version
+	var qry string
+	qry = `SELECT * FROM v$instance`
+
+	// Load data
+	var data []map[string]interface{}
+	data, err = oracledb.ProcessMetric(oraDB, qry)
+	if err != nil {
+		fmt.Println("error...")
+		failEvent := []common.MapStr{{"status": "OFFLINE"}}
+		// oraDB = nil
+		return failEvent, errors.Wrap(err, "oracledb-status fetch failed")
+	}
+
+	// Map data with multiple rows
+	event := []common.MapStr{}
+	for _, dd := range data {
+		event = append(event, eventMapping(dd))
+	}
+	fmt.Println("event:", event)
 
 	return event, nil
 }

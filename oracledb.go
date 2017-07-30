@@ -7,18 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"fmt"
+
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/metricbeat/mb"
 	_ "github.com/mattn/go-oci8" // Oracle OCI driver
 	"github.com/pkg/errors"
 )
-
-// OraDB ...
-type OraDB struct {
-	Db      *sql.DB
-	Version string
-}
 
 func init() {
 	// Register the ModuleFactory function for the "oracledb" module.
@@ -44,38 +40,29 @@ func NewModule(base mb.BaseModule) (mb.Module, error) {
 // must be valid, otherwise an error will be returned.
 //
 //   DSN Format: username/password@host:port/service_name
-func NewDB(ociURL string) (OraDB, error) {
-	var (
-		err error
-		odb OraDB
-	)
-
+func NewDB(ociURL string) (*sql.DB, error) {
 	// NLS_LANG is set to American format. At least NLS_NUMERIC_CHARACTERS has to be ".,".
 	os.Setenv("NLS_LANG", "AMERICAN_AMERICA.AL32UTF8")
 	os.Setenv("NLS_DATE_FORMAT", "YYYY-MM-DD\"T\"HH24:MI:SS")
 
 	// Open DB connection
-	odb.Db, err = sql.Open("oci8", ociURL)
+	oConn, err := sql.Open("oci8", ociURL)
 	if err != nil {
-		return odb, errors.Wrap(err, "sql open failed")
+		return oConn, errors.Wrap(err, "sql open failed")
 	}
 
-	// Get DB version
-	var version []map[string]interface{}
-	version, err = ProcessMetric(odb.Db, "SELECT version FROM v$instance")
-	if err != nil {
-		return odb, errors.Wrap(err, "get Database Version failed.")
-	}
-	odb.Version = version[0]["VERSION"].(string)
-
-	return odb, nil
+	return oConn, nil
 }
 
 // ProcessMetric pases database rows and returns a map
-func ProcessMetric(db *sql.DB, sql string) ([]map[string]interface{}, error) {
+func ProcessMetric(oraDB *sql.DB, sql string) ([]map[string]interface{}, error) {
+	var err error
+
+	fmt.Println("SQL:", sql[:20], oraDB)
 	var resultMap []map[string]interface{}
+
 	// Run query
-	queryResult, err := db.Query(sql)
+	queryResult, err := oraDB.Query(sql)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +78,7 @@ func ProcessMetric(db *sql.DB, sql string) ([]map[string]interface{}, error) {
 	for _, col := range colNames {
 		rowData[col] = new(interface{})
 		rowVars = append(rowVars, rowData[col])
+		// fmt.Println("col", col)
 	}
 
 	// loop through database result set
@@ -111,6 +99,7 @@ func ProcessMetric(db *sql.DB, sql string) ([]map[string]interface{}, error) {
 		resultMap = append(resultMap, rowMap)
 	}
 
+	fmt.Println("resultMap:", resultMap)
 	return resultMap, nil
 }
 
@@ -156,18 +145,29 @@ func parseRow(rowData map[string]*interface{}, row map[string]interface{}) (map[
 // VersionMatch checks if oracle version matches to monitor version
 //
 // oVer must be between lowVer and highVer. Then 1 is returned, else 0.
-func VersionMatch(oVer string, lowVer string, highVer string) int {
-	var oVersion []int
-	var lowVersion []int
-	var highVersion []int
+func VersionMatch(oraDB *sql.DB, lowVer string, highVer string) int {
+	var (
+		oVersion    []int
+		lowVersion  []int
+		highVersion []int
+		err         error
+	)
+
+	fmt.Println("Run VersionMatch...")
+	// Get DB version
+	var version []map[string]interface{}
+	version, err = ProcessMetric(oraDB, "SELECT version FROM v$instance")
+	if err != nil {
+		return 0
+	}
 
 	// Avoid null pointer
-	if oVer == "" || lowVer == "" || highVer == "" {
+	if lowVer == "" || highVer == "" {
 		return 0
 	}
 
 	// Split version string at "."
-	for _, i := range strings.Split(oVer, ".") {
+	for _, i := range strings.Split(version[0]["VERSION"].(string), ".") {
 		j, _ := strconv.Atoi(i)
 		oVersion = append(oVersion, j)
 	}

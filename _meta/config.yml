@@ -1,5 +1,5 @@
 - module: oracledb
-  metricsets: ["status", "tablespace"]
+  metricsets: ["status", "tablespace", "fra"]
   enabled: true
   period: 10s
 

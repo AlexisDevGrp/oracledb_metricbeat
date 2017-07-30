@@ -1,6 +1,9 @@
 package status
 
 import (
+	"fmt"
+	"runtime/debug"
+
 	"github.com/elastic/beats/libbeat/common"
 	"github.com/elastic/beats/libbeat/logp"
 	"github.com/elastic/beats/metricbeat/mb"
@@ -48,38 +51,38 @@ func New(base mb.BaseMetricSet) (mb.MetricSet, error) {
 // It returns the event which is then forward to the output. In case of an error, a
 // descriptive error must be returned.
 func (m *MetricSet) Fetch() ([]common.MapStr, error) {
-	// // Recover panic is for deugging only!!!
-	// defer func() {
-	// 	if err := recover(); err != nil {
-	// 		fmt.Println("Panic!", err)
-	// 		fmt.Println(string(debug.Stack()))
-	// 	}
-	// }()
-
-	var err error
-	// Open db connection if not done already
-	if m.oraDB.Db == nil {
-		m.oraDB, err = oracledb.NewDB(m.HostData().URI)
-		if err != nil {
-			failEvent := []common.MapStr{{"status": "OFFLINE"}}
-			m.oraDB.Db = nil
-			return failEvent, errors.Wrap(err, "oracledb-status open db connection failed")
+	// Recover panic is for deugging only!!!
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("Panic!", err)
+			fmt.Println(string(debug.Stack()))
 		}
+	}()
+
+	// Open Dataase connection
+	oraDB, err := oracledb.NewDB(m.HostData().URI)
+	if err != nil {
+		failEvent := []common.MapStr{{"status": "OFFLINE"}}
+		return failEvent, errors.Wrap(err, "oracledb-status open db connection failed")
 	}
+	defer oraDB.Close()
+
+	// Oracle Database query of this MetricSet
+	// Any database version
 
 	// Oracle Database query of this MetricSet
 	var qry string
-	if oracledb.VersionMatch(m.oraDB.Version, "0", "11.2") == 1 {
+	if oracledb.VersionMatch(oraDB, "0", "11.2") == 1 {
 		// 11g
 		qry = `SELECT inst_id, instance_name, host_name, version, startup_time, status,
 					  parallel, thread#, archiver, instance_role
 				FROM  gv$instance`
-	} else if oracledb.VersionMatch(m.oraDB.Version, "12.1", "12.1") == 1 {
+	} else if oracledb.VersionMatch(oraDB, "12.1", "12.1") == 1 {
 		// 12cR1
 		qry = `SELECT inst_id, instance_name, host_name, version, startup_time, status,
 					  parallel, thread#, archiver, instance_role, con_id, edition
 				FROM  gv$instance`
-	} else if oracledb.VersionMatch(m.oraDB.Version, "12.2", "9999") == 1 {
+	} else if oracledb.VersionMatch(oraDB, "12.2", "9999") == 1 {
 		// 12cR2
 		qry = `SELECT inst_id, instance_name, host_name, version, startup_time, status,
 					  parallel, thread#, archiver, instance_role, con_id, edition, database_type
@@ -88,7 +91,8 @@ func (m *MetricSet) Fetch() ([]common.MapStr, error) {
 
 	// Load data
 	var data []map[string]interface{}
-	data, err = oracledb.ProcessMetric(m.oraDB.Db, qry)
+	// data, err = oracledb.ProcessMetric(m.oraDB.Db, qry)
+	data, err = oracledb.ProcessMetric(oraDB, qry)
 	if err != nil {
 		failEvent := []common.MapStr{{"status": "OFFLINE"}}
 		m.oraDB.Db = nil
